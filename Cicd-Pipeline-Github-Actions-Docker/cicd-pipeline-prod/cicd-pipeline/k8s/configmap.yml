@@ -1,0 +1,12 @@
+# ─────────────────────────────────────────────────────────────────
+#  ConfigMap — Non-sensitive application configuration
+# ─────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cicd-flask-config
+  namespace: default
+data:
+  FLASK_ENV: "production"
+  PORT: "5000"
+  LOG_LEVEL: "info"

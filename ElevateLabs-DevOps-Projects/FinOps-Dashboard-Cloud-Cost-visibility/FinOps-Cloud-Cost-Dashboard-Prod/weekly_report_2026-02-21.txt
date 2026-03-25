@@ -1,0 +1,99 @@
+══════════════════════════════════════════════════════════════════════════
+  FINOPS CLOUD COST VISIBILITY — WEEKLY REPORT
+  Period   : 2026-02-15  →  2026-02-21  (week of February 15, 2026)
+  Generated: 2026-02-21 19:22:12 UTC
+  Month Day: 21/30  |  Projection Factor: 1.43x
+══════════════════════════════════════════════════════════════════════════
+
+  ◆ EXECUTIVE SUMMARY
+──────────────────────────────────────────────────────────────────────────
+  Total Services Monitored : 10
+  🔴 BREACH                : 3 service(s)  ← BILLING MAY HAVE STARTED
+  ⚠️  AT-RISK               : 5 service(s)  ← Approaching limit
+  ✅ SAFE                  : 2 service(s)
+  Estimated Monthly Overage: $1.0053 USD
+
+  🚨 BREACH SERVICES:
+     • S3 Storage                       203.4%  |  Est $0.1189
+     • Data Transfer Out                147.1%  |  Est $0.6357
+     • RDS db.t2.micro                  102.0%  |  Est $0.2506
+  ⚠️  AT-RISK SERVICES:
+     • DynamoDB Storage                  97.6%
+     • CloudTrail Events                 87.8%
+     • EC2 t2.micro                      86.7%
+     • CloudWatch Metrics                82.9%
+     • Lambda Requests                   74.3%
+
+  ◆ SERVICE USAGE TABLE  (Month-to-Date vs Free Tier)
+──────────────────────────────────────────────────────────────────────────
+  Service                          MTD   Projected    Limit   %Used Trend   Status
+--------------------------------------------------------------------------
+  EC2 t2.micro                  455.22      650.31      750   86.7%     ↑   ⚠️  AT-RISK
+  RDS db.t2.micro               535.32      764.74      750  102.0%     ↑   🔴 BREACH
+  S3 Storage                      7.12       10.17      5.0  203.4%     ↑   🔴 BREACH
+  Lambda Requests            520041.30   742916.14  1000000   74.3%     ↓   ⚠️  AT-RISK
+  DynamoDB Storage               17.08       24.40     25.0   97.6%     ↑   ⚠️  AT-RISK
+  Data Transfer Out              15.44       22.06     15.0  147.1%     ↑   🔴 BREACH
+  CloudWatch Metrics              5.80        8.29       10   82.9%     ↑   ⚠️  AT-RISK
+  CloudTrail Events           55292.88    78989.82    90000   87.8%     ↑   ⚠️  AT-RISK
+  SNS Notifications          413143.29   590204.70  1000000   59.0%     ↑   ✅ SAFE
+  SQS Requests               483481.71   690688.15  1000000   69.1%     →   ✅ SAFE
+
+  Note: MTD = Month-to-Date actual  |  Projected = estimated month-end usage
+
+  ◆ CATEGORY BREAKDOWN
+──────────────────────────────────────────────────────────────────────────
+  Category        Services   Breach   At-Risk   Est Cost
+--------------------------------------------------------------------------
+  compute                2        0         2 $   0.0000
+  database               2        1         1 $   0.2506
+  network                1        1         0 $   0.6357
+  ops                    4        0         2 $   0.0000
+  storage                1        1         0 $   0.1189
+
+  ◆ 7-DAY DAILY USAGE HEATMAP  (All Services Combined)
+──────────────────────────────────────────────────────────────────────────
+  Date         Bar (scaled)                                Total Units
+--------------------------------------------------------------------------
+  2026-02-15   ██████████████████████████████████████░░      71,358.9
+  2026-02-16   █████████████████████████████████░░░░░░░      62,768.2
+  2026-02-17   ███████████████████████████████████████░      73,743.4
+  2026-02-18   ████████████████████████████████████████      73,946.3
+  2026-02-19   █████████████████████████████████░░░░░░░      61,107.2
+  2026-02-20   ███████████████████████████████░░░░░░░░░      59,058.6
+  2026-02-21   █████████████████████████████████████░░░      69,187.5
+
+  ◆ REMAINING FREE-TIER BUDGET  (Days left in month)
+──────────────────────────────────────────────────────────────────────────
+  Days remaining in billing month: 9
+
+  Service                        Used MTD    Limit   Remaining  Daily Budget
+--------------------------------------------------------------------------
+  EC2 t2.micro                     455.22      750      294.78        32.754 
+  RDS db.t2.micro                  535.32      750      214.68        23.853 
+  S3 Storage                         7.12      5.0        0.00         0.000 
+  Lambda Requests               520041.30  1000000   479958.70     53328.745 
+  DynamoDB Storage                  17.08     25.0        7.92         0.880 
+  Data Transfer Out                 15.44     15.0        0.00         0.000 
+  CloudWatch Metrics                 5.80       10        4.20         0.467 
+  CloudTrail Events              55292.88    90000    34707.12      3856.347 
+  SNS Notifications             413143.29  1000000   586856.71     65206.301 
+  SQS Requests                  483481.71  1000000   516518.29     57390.921 
+
+  ◆ ACTIONABLE RECOMMENDATIONS  (Ordered by Urgency)
+──────────────────────────────────────────────────────────────────────────
+  🔴 [DATABASE] RDS db.t2.micro: BREACH (102.0%). Projected 764.7 Hrs > limit 750. STOP or right-size immediately.
+  🔴 [NETWORK] Data Transfer Out: BREACH (147.1%). Projected 22.1 GB > limit 15.0. STOP or right-size immediately.
+  🔴 [STORAGE] S3 Storage: BREACH (203.4%). Projected 10.2 GB > limit 5.0. STOP or right-size immediately.
+  🟠 [DATABASE] DynamoDB Storage: CRITICAL (97.6%). Reduce usage by 3.1 GB/mo within 48hrs.
+  ⚠️  [COMPUTE] EC2 t2.micro: AT-RISK (86.7%). Monitor daily. Consider S3 lifecycle rules / Lambda optimization.
+  ⚠️  [COMPUTE] Lambda Requests: AT-RISK (74.3%). Monitor daily. Consider S3 lifecycle rules / Lambda optimization.
+  ⚠️  [OPS] CloudTrail Events: AT-RISK (87.8%). Monitor daily. Consider S3 lifecycle rules / Lambda optimization.
+  ⚠️  [OPS] CloudWatch Metrics: AT-RISK (82.9%). Monitor daily. Consider S3 lifecycle rules / Lambda optimization.
+  ✅ [OPS] SNS Notifications: SAFE (59.0%). No action needed.
+  ✅ [OPS] SQS Requests: SAFE (69.1%). No action needed.
+
+══════════════════════════════════════════════════════════════════════════
+  FinOps Dashboard  |  github.com/yourorg/finops-dashboard
+  Report auto-generated: 2026-02-21T19:22:12Z
+══════════════════════════════════════════════════════════════════════════

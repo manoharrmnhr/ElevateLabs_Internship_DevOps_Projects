@@ -1,0 +1,48 @@
+---
+# ═══════════════════════════════════════════════════════════════
+# VirtualService — Phase 2: 50 / 50 split
+# Apply when canary error rate < 1% for 30 minutes at 20%
+# kubectl apply -f 04-vs-50-50.yaml
+# ═══════════════════════════════════════════════════════════════
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: demo-app-vs
+  namespace: canary-demo
+  annotations:
+    traffic.canary/stable-weight: "50"
+    traffic.canary/canary-weight: "50"
+    traffic.canary/phase:         "mid-rollout"
+spec:
+  hosts:
+  - "demo-app.local"
+  - demo-app
+  gateways:
+  - demo-app-gateway
+  - mesh
+  http:
+  - name: canary-force
+    match:
+    - headers:
+        x-canary:
+          exact: "force"
+    route:
+    - destination:
+        host: demo-app
+        subset: canary
+      weight: 100
+  - name: weight-split
+    route:
+    - destination:
+        host:   demo-app
+        subset: stable
+      weight: 50
+    - destination:
+        host:   demo-app
+        subset: canary
+      weight: 50
+    timeout: 10s
+    retries:
+      attempts: 3
+      perTryTimeout: 3s
+      retryOn: "gateway-error,connect-failure,5xx"

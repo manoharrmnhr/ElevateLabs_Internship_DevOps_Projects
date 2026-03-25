@@ -1,0 +1,92 @@
+---
+# ═══════════════════════════════════════════════════════════════
+# VirtualService — demo-app-vs
+# Phase 1: 80% stable / 20% canary
+#
+# Special routing rules (evaluated top-to-bottom):
+#   1. x-canary: force  → always hit canary  (QA testing)
+#   2. x-canary: block  → always hit stable  (admin override)
+#   3. Default          → weight-based split
+#
+# Retry policy prevents transient failures from reaching users.
+# ═══════════════════════════════════════════════════════════════
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: demo-app-vs
+  namespace: canary-demo
+  labels:
+    app.kubernetes.io/part-of: canary-demo
+  annotations:
+    traffic.canary/stable-weight: "80"
+    traffic.canary/canary-weight: "20"
+    traffic.canary/phase:         "initial"
+    traffic.canary/updated-at:    "2026-02-23T00:00:00Z"
+spec:
+  hosts:
+  - "demo-app.local"          # external host (Gateway)
+  - demo-app                  # in-cluster hostname (mesh)
+  gateways:
+  - demo-app-gateway          # external traffic
+  - mesh                      # east-west / service-to-service traffic
+
+  http:
+  # ── Rule 1: Force canary via request header ────────────────
+  # curl -H "x-canary: force" http://demo-app.local/
+  - name: canary-force
+    match:
+    - headers:
+        x-canary:
+          exact: "force"
+    route:
+    - destination:
+        host:   demo-app
+        subset: canary
+      weight: 100
+    retries:
+      attempts:          3
+      perTryTimeout:     3s
+      retryOn:           "gateway-error,connect-failure,retriable-4xx"
+
+  # ── Rule 2: Block canary (admin escape hatch) ──────────────
+  # curl -H "x-canary: block" http://demo-app.local/
+  - name: canary-block
+    match:
+    - headers:
+        x-canary:
+          exact: "block"
+    route:
+    - destination:
+        host:   demo-app
+        subset: stable
+      weight: 100
+
+  # ── Rule 3: Default weight-based split  80 / 20 ───────────
+  - name: canary-weight-split
+    route:
+    - destination:
+        host:   demo-app
+        subset: stable
+      weight: 80
+    - destination:
+        host:   demo-app
+        subset: canary
+      weight: 20
+    # Global timeout for all requests
+    timeout: 10s
+    # Retry policy: shields users from transient errors
+    retries:
+      attempts:      3
+      perTryTimeout: 3s
+      retryOn:       "gateway-error,connect-failure,retriable-4xx,5xx"
+      retryRemoteLocalities: true
+    # Fault injection for chaos testing (disabled by default)
+    # fault:
+    #   delay:
+    #     percentage:
+    #       value: 5.0
+    #     fixedDelay: 3s
+    #   abort:
+    #     percentage:
+    #       value: 1.0
+    #     httpStatus: 500

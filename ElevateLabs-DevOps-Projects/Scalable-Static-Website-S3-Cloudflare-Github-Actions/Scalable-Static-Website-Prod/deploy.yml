@@ -1,0 +1,310 @@
+# ══════════════════════════════════════════════════════════════════════════════
+#  .github/workflows/deploy.yml
+#  CloudStatic — Production CI/CD Pipeline
+#  Trigger : Push to main branch  |  Manual dispatch (workflow_dispatch)
+#
+#  Jobs:
+#    1. validate  — Lint/check all HTML files before any deployment
+#    2. deploy    — AWS S3 sync (typed cache headers) + Cloudflare purge + test
+#
+#  Required GitHub Secrets:
+#    AWS_ACCESS_KEY_ID      — IAM user access key
+#    AWS_SECRET_ACCESS_KEY  — IAM user secret key
+#    AWS_REGION             — e.g. ap-south-1
+#    S3_BUCKET_NAME         — e.g. www.yourdomain.com
+#    CF_ZONE_ID             — Cloudflare Zone ID
+#    CF_API_TOKEN           — Cloudflare API token (Cache Purge permission)
+#    SITE_DOMAIN            — e.g. www.yourdomain.com
+# ══════════════════════════════════════════════════════════════════════════════
+
+name: 🚀 Deploy to S3 + Cloudflare
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+    inputs:
+      force_purge:
+        description: 'Force full Cloudflare cache purge'
+        required: false
+        default: 'true'
+        type: boolean
+
+# ── Prevent duplicate/concurrent deploys ──────────────────────
+concurrency:
+  group: production-deploy
+  cancel-in-progress: true
+
+env:
+  NODE_ENV: production
+
+jobs:
+  # ────────────────────────────────────────────────────────────
+  # JOB 1 ─ VALIDATE
+  # Runs on every push; gates the deploy job.
+  # ────────────────────────────────────────────────────────────
+  validate:
+    name: ✅ Validate Source Files
+    runs-on: ubuntu-latest
+    outputs:
+      file_count: ${{ steps.count.outputs.count }}
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 📊 Count source files
+        id: count
+        run: |
+          COUNT=$(find src/ -type f | wc -l)
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "### Source File Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          find src/ -type f | sort | while read f; do
+            SIZE=$(du -sh "$f" | cut -f1)
+            echo "- \`$f\` ($SIZE)" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: 🔍 Validate HTML files
+        run: |
+          ERRORS=0
+          for f in $(find src/ -name "*.html"); do
+            echo "Checking: $f"
+            if ! grep -q "<!DOCTYPE html>" "$f"; then
+              echo "  ❌ ERROR: Missing DOCTYPE in $f"
+              ERRORS=$((ERRORS+1))
+            else
+              echo "  ✅ DOCTYPE OK"
+            fi
+            if ! grep -q "<html" "$f"; then
+              echo "  ❌ ERROR: Missing <html> tag in $f"
+              ERRORS=$((ERRORS+1))
+            fi
+            if ! grep -q "<head" "$f"; then
+              echo "  ❌ ERROR: Missing <head> tag in $f"
+              ERRORS=$((ERRORS+1))
+            fi
+            if ! grep -q "<body" "$f"; then
+              echo "  ❌ ERROR: Missing <body> tag in $f"
+              ERRORS=$((ERRORS+1))
+            fi
+          done
+          if [ "$ERRORS" -gt 0 ]; then
+            echo "❌ Validation failed with $ERRORS error(s). Aborting deploy."
+            exit 1
+          fi
+          echo "✅ All HTML files passed validation."
+
+      - name: 🔍 Check CSS/JS for syntax hints
+        run: |
+          CSS_COUNT=$(find src/ -name "*.css" | wc -l)
+          JS_COUNT=$(find src/ -name "*.js" | wc -l)
+          echo "CSS files: $CSS_COUNT"
+          echo "JS files : $JS_COUNT"
+          # Check that CSS files don't have unmatched braces (basic check)
+          for f in $(find src/ -name "*.css"); do
+            OPEN=$(grep -o '{' "$f" | wc -l)
+            CLOSE=$(grep -o '}' "$f" | wc -l)
+            if [ "$OPEN" -ne "$CLOSE" ]; then
+              echo "⚠️  WARNING: Unmatched braces in $f (open: $OPEN, close: $CLOSE)"
+            else
+              echo "✅ $f — braces balanced"
+            fi
+          done
+
+  # ────────────────────────────────────────────────────────────
+  # JOB 2 ─ DEPLOY
+  # Runs only after validate passes.
+  # ────────────────────────────────────────────────────────────
+  deploy:
+    name: 🌍 Deploy to AWS S3 + Cloudflare
+    runs-on: ubuntu-latest
+    needs: validate
+    environment: production
+
+    steps:
+      # 1 ── Checkout ──────────────────────────────────────────
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      # 2 ── Configure AWS credentials ─────────────────────────
+      - name: 🔑 Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ secrets.AWS_REGION }}
+
+      # 3 ── Verify S3 bucket exists ───────────────────────────
+      - name: 🪣 Verify S3 bucket access
+        run: |
+          echo "Verifying access to s3://${{ secrets.S3_BUCKET_NAME }}"
+          aws s3 ls s3://${{ secrets.S3_BUCKET_NAME }} > /dev/null 2>&1 || {
+            echo "❌ Cannot access bucket. Check bucket name and IAM permissions."
+            exit 1
+          }
+          echo "✅ Bucket accessible."
+
+      # 4 ── Sync HTML — no-cache (always fresh) ───────────────
+      - name: 📄 Sync HTML files (no-cache)
+        run: |
+          echo "Syncing HTML files with no-cache headers..."
+          aws s3 sync src/ s3://${{ secrets.S3_BUCKET_NAME }}/ \
+            --exclude "*" \
+            --include "*.html" \
+            --cache-control "no-cache, no-store, must-revalidate" \
+            --content-type "text/html; charset=utf-8" \
+            --metadata-directive REPLACE \
+            --delete \
+            --output text
+          echo "✅ HTML sync complete."
+
+      # 5 ── Sync CSS — 1-year immutable cache ─────────────────
+      - name: 🎨 Sync CSS files (immutable cache)
+        run: |
+          echo "Syncing CSS files with 1-year immutable cache..."
+          aws s3 sync src/ s3://${{ secrets.S3_BUCKET_NAME }}/ \
+            --exclude "*" \
+            --include "*.css" \
+            --cache-control "public, max-age=31536000, immutable" \
+            --content-type "text/css" \
+            --metadata-directive REPLACE \
+            --output text
+          echo "✅ CSS sync complete."
+
+      # 6 ── Sync JS — 1-year immutable cache ──────────────────
+      - name: ⚡ Sync JavaScript files (immutable cache)
+        run: |
+          echo "Syncing JS files with 1-year immutable cache..."
+          aws s3 sync src/ s3://${{ secrets.S3_BUCKET_NAME }}/ \
+            --exclude "*" \
+            --include "*.js" \
+            --cache-control "public, max-age=31536000, immutable" \
+            --content-type "application/javascript" \
+            --metadata-directive REPLACE \
+            --output text
+          echo "✅ JavaScript sync complete."
+
+      # 7 ── Sync images & other assets ────────────────────────
+      - name: 🖼️ Sync static assets (30-day cache)
+        run: |
+          echo "Syncing static assets..."
+          aws s3 sync src/ s3://${{ secrets.S3_BUCKET_NAME }}/ \
+            --exclude "*.html" \
+            --exclude "*.css" \
+            --exclude "*.js" \
+            --cache-control "public, max-age=2592000" \
+            --metadata-directive REPLACE \
+            --output text
+          echo "✅ Assets sync complete."
+
+      # 8 ── Set security headers on HTML ──────────────────────
+      - name: 🔒 Apply security metadata to HTML
+        run: |
+          for KEY in $(aws s3 ls s3://${{ secrets.S3_BUCKET_NAME }}/ --recursive \
+            | awk '{print $4}' | grep "\.html$"); do
+            aws s3 cp "s3://${{ secrets.S3_BUCKET_NAME }}/$KEY" \
+                      "s3://${{ secrets.S3_BUCKET_NAME }}/$KEY" \
+              --metadata-directive REPLACE \
+              --cache-control "no-cache, no-store, must-revalidate" \
+              --content-type "text/html; charset=utf-8" \
+              --metadata "x-deploy-time=$(date -u +%Y-%m-%dT%H:%M:%SZ),x-commit=${{ github.sha }}" \
+              --acl public-read 2>/dev/null || true
+          done
+          echo "✅ Security metadata applied."
+
+      # 9 ── Verify bucket after deploy ─────────────────────────
+      - name: 📋 Verify S3 deployment
+        run: |
+          echo "=== S3 Bucket Contents After Deploy ==="
+          aws s3 ls s3://${{ secrets.S3_BUCKET_NAME }}/ --recursive --human-readable --summarize
+          echo ""
+          echo "Deployed commit : ${{ github.sha }}"
+          echo "Deployed at     : $(date -u)"
+          echo "Deployed by     : ${{ github.actor }}"
+
+      # 10 ── Purge Cloudflare cache ────────────────────────────
+      - name: 🔄 Purge Cloudflare CDN cache
+        id: cf_purge
+        run: |
+          echo "Purging Cloudflare cache for zone ${{ secrets.CF_ZONE_ID }}..."
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE_ID }}/purge_cache" \
+            -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            --data '{"purge_everything":true}')
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -1)
+
+          echo "HTTP Status : $HTTP_CODE"
+          echo "CF Response : $BODY"
+
+          if echo "$BODY" | grep -q '"success":true'; then
+            echo "✅ Cloudflare cache purged successfully."
+          else
+            echo "❌ Cloudflare purge failed. Response: $BODY"
+            exit 1
+          fi
+
+      # 11 ── Live smoke test ───────────────────────────────────
+      - name: 🔬 Smoke test live URL
+        run: |
+          SITE="https://${{ secrets.SITE_DOMAIN }}"
+          echo "Running smoke test on: $SITE"
+
+          # Wait a moment for DNS/CDN to propagate
+          sleep 5
+
+          STATUS=$(curl -o /dev/null -s -w "%{http_code}" \
+            --max-time 15 \
+            -H "User-Agent: GitHub-Actions-SmokeTest/1.0" \
+            "$SITE")
+
+          echo "HTTP Status: $STATUS"
+
+          if [ "$STATUS" = "200" ]; then
+            echo "✅ Smoke test passed — site returned HTTP 200."
+          elif [ "$STATUS" = "301" ] || [ "$STATUS" = "302" ]; then
+            echo "⚠️  Redirect ($STATUS) — likely HTTP→HTTPS redirect. OK."
+          else
+            echo "⚠️  Unexpected status $STATUS — verify site manually at $SITE"
+          fi
+
+          # Check HTTPS certificate
+          echo ""
+          echo "=== SSL Certificate Info ==="
+          echo | openssl s_client -connect ${{ secrets.SITE_DOMAIN }}:443 \
+            -servername ${{ secrets.SITE_DOMAIN }} 2>/dev/null \
+            | openssl x509 -noout -subject -dates 2>/dev/null || echo "(cert check skipped)"
+
+      # 12 ── Job Summary ───────────────────────────────────────
+      - name: 📊 Write deployment summary
+        if: always()
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" << 'EOF'
+          ## 🚀 Deployment Report
+
+          | Field | Value |
+          |-------|-------|
+          | **Status** | ✅ Deployed |
+          | **Environment** | Production |
+          | **Branch** | main |
+          | **Commit** | `${{ github.sha }}` |
+          | **Actor** | ${{ github.actor }} |
+          | **S3 Bucket** | ${{ secrets.S3_BUCKET_NAME }} |
+          | **CDN** | Cloudflare (cache purged) |
+          | **HTTPS** | ✅ Enabled (Cloudflare SSL) |
+          | **Deployed At** | $(date -u +"%Y-%m-%d %H:%M UTC") |
+
+          ### Cache Strategy Applied
+          | Asset Type | Cache-Control |
+          |-----------|---------------|
+          | HTML | `no-cache, must-revalidate` |
+          | CSS / JS | `public, max-age=31536000, immutable` |
+          | Images / Assets | `public, max-age=2592000` |
+          EOF

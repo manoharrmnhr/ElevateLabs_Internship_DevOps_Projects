@@ -1,0 +1,85 @@
+---
+# ═══════════════════════════════════════════════════════════════
+# ServiceMonitor — tells Prometheus Operator to scrape demo-app
+# Requires: prometheus-operator / kube-prometheus-stack installed
+# ═══════════════════════════════════════════════════════════════
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: demo-app-monitor
+  namespace: canary-demo
+  labels:
+    release: prometheus          # matches kube-prometheus-stack label
+    app:     demo-app
+spec:
+  selector:
+    matchLabels:
+      app: demo-app
+  endpoints:
+  - port:          http
+    path:          /metrics
+    interval:      15s
+    scrapeTimeout: 10s
+    honorLabels:   true
+  namespaceSelector:
+    matchNames:
+    - canary-demo
+---
+# ═══════════════════════════════════════════════════════════════
+# PrometheusRule — alerting rules for canary SLOs
+# ═══════════════════════════════════════════════════════════════
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: canary-slo-alerts
+  namespace: canary-demo
+  labels:
+    release: prometheus
+spec:
+  groups:
+  - name: canary.slo
+    interval: 30s
+    rules:
+    # ── Alert: Canary error rate exceeds 5% ─────────────────
+    - alert: CanaryHighErrorRate
+      expr: |
+        app_error_rate_pct{track="canary"} > 5
+      for: 2m
+      labels:
+        severity: critical
+        track:    canary
+      annotations:
+        summary:     "Canary error rate {{ $value | printf \"%.1f\" }}% exceeds 5% threshold"
+        description: "Canary ({{ $labels.version }}) error rate is {{ $value | printf \"%.2f\" }}%. Consider rolling back."
+        runbook:     "kubectl apply -f istio/06-vs-rollback.yaml"
+
+    # ── Alert: Canary p95 latency > 500ms ───────────────────
+    - alert: CanaryHighLatency
+      expr: |
+        app_latency_avg_ms{track="canary"} > 400
+      for: 5m
+      labels:
+        severity: warning
+        track:    canary
+      annotations:
+        summary:     "Canary avg latency {{ $value | printf \"%.0f\" }}ms exceeds 400ms"
+        description: "Canary average latency is elevated. Investigate before continuing rollout."
+
+    # ── Alert: Canary pod restarting ─────────────────────────
+    - alert: CanaryPodCrashLooping
+      expr: |
+        increase(kube_pod_container_status_restarts_total{
+          namespace="canary-demo",pod=~"app-canary.*"
+        }[5m]) > 2
+      for: 1m
+      labels:
+        severity: critical
+        track:    canary
+      annotations:
+        summary: "Canary pod {{ $labels.pod }} is crash-looping"
+        runbook: "kubectl apply -f istio/06-vs-rollback.yaml"
+
+    # ── Info: Stable vs Canary request comparison ────────────
+    - record: canary:request_rate:5m
+      expr: |
+        rate(app_http_requests_total[5m])

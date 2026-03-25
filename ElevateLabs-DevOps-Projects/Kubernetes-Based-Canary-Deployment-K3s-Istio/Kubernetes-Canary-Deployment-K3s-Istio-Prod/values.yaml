@@ -1,0 +1,67 @@
+# ── Global ────────────────────────────────────────────────────────────────────
+namespace: canary-demo
+image:
+  registry:    ""            # e.g. docker.io/myorg — leave empty for local images
+  pullPolicy:  IfNotPresent
+
+# ── Stable track ──────────────────────────────────────────────────────────────
+stable:
+  enabled:    true
+  name:       app-stable
+  image:      demo-app
+  tag:        v1.0.0
+  replicas:   3
+  version:    v1.0.0
+  buildId:    stable-001
+  track:      stable
+  resources:
+    requests: { cpu: 50m,  memory: 64Mi  }
+    limits:   { cpu: 250m, memory: 128Mi }
+  hpa:
+    enabled:     true
+    minReplicas: 3
+    maxReplicas: 10
+    cpuTarget:   60
+  pdb:
+    enabled:      true
+    minAvailable: 2
+
+# ── Canary track ──────────────────────────────────────────────────────────────
+canary:
+  enabled:    true
+  name:       app-canary
+  image:      demo-app
+  tag:        v2.0.0
+  replicas:   1
+  version:    v2.0.0
+  buildId:    canary-001
+  track:      canary
+  faultRate:  "0.03"
+  resources:
+    requests: { cpu: 50m,  memory: 64Mi  }
+    limits:   { cpu: 250m, memory: 128Mi }
+  pdb:
+    enabled:      true
+    minAvailable: 1
+
+# ── Traffic weights ───────────────────────────────────────────────────────────
+traffic:
+  stableWeight: 80
+  canaryWeight: 20
+
+# ── Istio ─────────────────────────────────────────────────────────────────────
+istio:
+  gateway:
+    host: demo-app.local
+  mtls:
+    enabled: true
+
+# ── Monitoring ────────────────────────────────────────────────────────────────
+monitoring:
+  serviceMonitor:
+    enabled:  true
+    interval: 15s
+  prometheusRules:
+    enabled:          true
+    errorThreshold:   5
+    latencyThreshold: 400

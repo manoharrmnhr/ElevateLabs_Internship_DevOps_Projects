@@ -1,0 +1,37 @@
+# =============================================================================
+#  terraform.tfvars.example
+#  Copy → terraform.tfvars  and fill in your real values.
+#  ⚠️  NEVER commit terraform.tfvars to version control!
+# =============================================================================
+
+# ── General ───────────────────────────────────────────
+project_name     = "tricloud"
+environment      = "dev"
+owner            = "your-name-or-team"
+local_domain     = "multicloud.local"
+allowed_ssh_cidr = "YOUR_PUBLIC_IP/32"   # e.g. "203.0.113.10/32" — restrict in production!
+
+# ── AWS ───────────────────────────────────────────────
+aws_access_key    = "AKIAIOSFODNN7EXAMPLE"
+aws_secret_key    = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+aws_region        = "us-east-1"
+aws_instance_type = "t2.micro"
+aws_ami_id        = "ami-0c7217cdde317cfec"   # Ubuntu 22.04 LTS — us-east-1
+aws_key_name      = "my-ec2-keypair"
+
+# ── Azure ─────────────────────────────────────────────
+azure_subscription_id     = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+azure_client_id           = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+azure_client_secret       = "your-azure-client-secret"
+azure_tenant_id           = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+azure_location            = "East US"
+azure_vm_size             = "Standard_B1s"
+azure_admin_username      = "azureuser"
+azure_ssh_public_key_path = "~/.ssh/id_rsa.pub"
+
+# ── GCP ───────────────────────────────────────────────
+gcp_project_id       = "my-gcp-project-id"
+gcp_region           = "us-central1"
+gcp_zone             = "us-central1-a"
+gcp_machine_type     = "e2-micro"
+gcp_credentials_file = "~/.gcp/credentials.json"

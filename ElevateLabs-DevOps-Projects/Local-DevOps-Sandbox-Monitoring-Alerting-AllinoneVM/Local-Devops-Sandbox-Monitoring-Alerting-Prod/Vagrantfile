@@ -1,0 +1,39 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "ubuntu/jammy64"
+  config.vm.hostname = "monitoring-sandbox"
+
+  # Network configuration
+  config.vm.network "private_network", ip: "192.168.56.10"
+  config.vm.network "forwarded_port", guest: 3000,  host: 3000,  host_ip: "127.0.0.1"  # Grafana
+  config.vm.network "forwarded_port", guest: 9090,  host: 9090,  host_ip: "127.0.0.1"  # Prometheus
+  config.vm.network "forwarded_port", guest: 9093,  host: 9093,  host_ip: "127.0.0.1"  # Alertmanager
+  config.vm.network "forwarded_port", guest: 9100,  host: 9100,  host_ip: "127.0.0.1"  # Node Exporter
+
+  # VM resources
+  config.vm.provider "virtualbox" do |vb|
+    vb.name   = "DevOps-Monitoring-Sandbox"
+    vb.memory = "2048"
+    vb.cpus   = 2
+    vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+  end
+
+  # Sync project configs into VM
+  config.vm.synced_folder "./configs", "/opt/monitoring/configs", create: true
+
+  # Run provisioning script
+  config.vm.provision "shell", path: "scripts/provision.sh", privileged: true
+
+  config.vm.post_up_message = <<-MSG
+  ============================================================
+   DevOps Monitoring Sandbox is READY!
+  ============================================================
+   Grafana      → http://localhost:3000  (admin / admin)
+   Prometheus   → http://localhost:9090
+   Alertmanager → http://localhost:9093
+   Node Exporter→ http://localhost:9100/metrics
+  ============================================================
+  MSG
+end

@@ -1,0 +1,97 @@
+version: "3.9"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# FinOps Dashboard — Docker Compose
+#
+# Services:
+#   grafana   : Grafana 10.x with SQLite datasource plugin pre-installed
+#   finops    : Python pipeline container (fetch → alert → report)
+#
+# Usage:
+#   docker compose up -d grafana          # Start just Grafana
+#   docker compose run --rm finops fetch  # One-shot fetch
+#   docker compose run --rm finops alerts # One-shot alerts
+#   docker compose run --rm finops report # One-shot report
+#   docker compose up finops-scheduler    # Start full automated scheduler
+# ──────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Grafana ────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: finops-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=finops123
+      - GF_INSTALL_PLUGINS=frser-sqlite-datasource
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./data:/var/lib/grafana/finops-data:ro        # SQLite DB read-only mount
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - finops-net
+
+  # ── Python Pipeline ────────────────────────────────────────────────────────
+  finops:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: finops-pipeline
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+      - FINOPS_DB_PATH=/app/data/finops.db
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./data:/app/data
+      - ./reports:/app/reports
+      - ./logs:/app/logs
+    depends_on:
+      grafana:
+        condition: service_healthy
+    networks:
+      - finops-net
+    # Default: simulate 30 days of data
+    command: ["python", "-m", "scripts.run_fetch", "--mode", "simulate", "--days", "30"]
+
+  # ── Automated Scheduler ────────────────────────────────────────────────────
+  finops-scheduler:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: finops-scheduler
+    restart: unless-stopped
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+      - FINOPS_DB_PATH=/app/data/finops.db
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./data:/app/data
+      - ./reports:/app/reports
+      - ./logs:/app/logs
+    networks:
+      - finops-net
+    command: ["python", "-m", "scripts.run_scheduler"]
+    profiles:
+      - scheduler   # Start only with: docker compose --profile scheduler up
+
+volumes:
+  grafana_data:
+
+networks:
+  finops-net:
+    driver: bridge

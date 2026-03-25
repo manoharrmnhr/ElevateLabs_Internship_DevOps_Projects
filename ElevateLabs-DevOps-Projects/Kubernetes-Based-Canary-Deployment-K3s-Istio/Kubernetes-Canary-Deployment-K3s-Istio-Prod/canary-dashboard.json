@@ -1,0 +1,191 @@
+{
+  "title": "Canary Deployment — Traffic & SLO Dashboard",
+  "uid": "canary-slo-001",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "tags": ["canary", "istio", "k3s", "slo"],
+  "templating": {
+    "list": [
+      {
+        "name": "namespace",
+        "type": "constant",
+        "current": { "value": "canary-demo" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Traffic Split — Stable",
+      "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "color": { "mode": "fixed", "fixedColor": "green" },
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(app_http_requests_total{track=\"stable\",namespace=\"canary-demo\"}[2m])) / sum(rate(app_http_requests_total{namespace=\"canary-demo\"}[2m])) * 100",
+          "legendFormat": "Stable %"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Traffic Split — Canary",
+      "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "color": { "mode": "fixed", "fixedColor": "purple" }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(app_http_requests_total{track=\"canary\",namespace=\"canary-demo\"}[2m])) / sum(rate(app_http_requests_total{namespace=\"canary-demo\"}[2m])) * 100",
+          "legendFormat": "Canary %"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Canary Error Rate",
+      "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 1    },
+              { "color": "red",    "value": 5    }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "max(app_error_rate_pct{track=\"canary\",namespace=\"canary-demo\"})",
+          "legendFormat": "Error Rate %"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Canary Avg Latency",
+      "gridPos": { "x": 12, "y": 0, "w": 4, "h": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 200  },
+              { "color": "red",    "value": 500  }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "avg(app_latency_avg_ms{track=\"canary\",namespace=\"canary-demo\"})",
+          "legendFormat": "Avg Latency"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Request Rate — Stable vs Canary",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" }
+      },
+      "targets": [
+        {
+          "expr": "rate(app_http_requests_total{track=\"stable\",namespace=\"canary-demo\"}[2m])",
+          "legendFormat": "Stable ({{ version }})"
+        },
+        {
+          "expr": "rate(app_http_requests_total{track=\"canary\",namespace=\"canary-demo\"}[2m])",
+          "legendFormat": "Canary ({{ version }})"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Error Rate % — Stable vs Canary",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "thresholdsStyle": { "mode": "area" }
+          },
+          "thresholds": {
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 1    },
+              { "color": "red",    "value": 5    }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "app_error_rate_pct{track=\"stable\",namespace=\"canary-demo\"}",
+          "legendFormat": "Stable Error %"
+        },
+        {
+          "expr": "app_error_rate_pct{track=\"canary\",namespace=\"canary-demo\"}",
+          "legendFormat": "Canary Error %"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Average Latency — Stable vs Canary",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "ms" }
+      },
+      "targets": [
+        {
+          "expr": "app_latency_avg_ms{track=\"stable\",namespace=\"canary-demo\"}",
+          "legendFormat": "Stable Latency"
+        },
+        {
+          "expr": "app_latency_avg_ms{track=\"canary\",namespace=\"canary-demo\"}",
+          "legendFormat": "Canary Latency"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Pod Status Summary",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "kube_pod_status_phase{namespace=\"canary-demo\",phase=\"Running\"}",
+          "legendFormat": "{{ pod }}",
+          "instant": true
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,231 @@
+---
+# ── Alertmanager ConfigMap ────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: self-healing
+data:
+  alertmanager.yml: |
+    global:
+      resolve_timeout: 5m
+
+    route:
+      receiver: nginx-recovery-webhook
+      group_by: [alertname, namespace, pod]
+      group_wait: 10s
+      group_interval: 30s
+      repeat_interval: 4h
+      routes:
+        - match:
+            severity: critical
+            action: restart_nginx
+          receiver: nginx-recovery-webhook
+          group_wait: 5s
+          repeat_interval: 30m
+
+        - match:
+            severity: critical
+          receiver: critical-webhook
+          group_wait: 5s
+
+    inhibit_rules:
+      - source_match:
+          alertname: NginxDown
+        target_match:
+          alertname: NginxReplicasMissing
+        equal: [namespace]
+
+    receivers:
+      - name: nginx-recovery-webhook
+        webhook_configs:
+          - url: http://webhook-receiver:5001/recover/nginx
+            send_resolved: true
+            timeout: 60s
+            http_config:
+              basic_auth:
+                username: webhook
+                password_file: /etc/alertmanager/secrets/webhook-password
+
+      - name: critical-webhook
+        webhook_configs:
+          - url: http://webhook-receiver:5001/alert/critical
+            send_resolved: true
+            timeout: 60s
+            http_config:
+              basic_auth:
+                username: webhook
+                password_file: /etc/alertmanager/secrets/webhook-password
+---
+# ── Alertmanager Secret ───────────────────────────────────────────────────────
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alertmanager-secrets
+  namespace: self-healing
+type: Opaque
+stringData:
+  webhook-password: "secret123"
+---
+# ── Alertmanager Deployment ───────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  namespace: self-healing
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alertmanager
+  template:
+    metadata:
+      labels:
+        app: alertmanager
+    spec:
+      containers:
+        - name: alertmanager
+          image: prom/alertmanager:latest
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+          ports:
+            - containerPort: 9093
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alertmanager
+            - name: secrets
+              mountPath: /etc/alertmanager/secrets
+              readOnly: true
+            - name: storage
+              mountPath: /alertmanager
+      volumes:
+        - name: config
+          configMap:
+            name: alertmanager-config
+        - name: secrets
+          secret:
+            secretName: alertmanager-secrets
+        - name: storage
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  namespace: self-healing
+spec:
+  selector:
+    app: alertmanager
+  ports:
+    - port: 9093
+      targetPort: 9093
+---
+# ── Webhook Receiver Deployment ───────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webhook-receiver
+  namespace: self-healing
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: webhook-receiver
+  template:
+    metadata:
+      labels:
+        app: webhook-receiver
+    spec:
+      serviceAccountName: webhook-receiver-sa
+      containers:
+        - name: webhook-receiver
+          image: your-registry/webhook-receiver:latest
+          ports:
+            - containerPort: 5001
+          env:
+            - name: WEBHOOK_USER
+              value: webhook
+            - name: WEBHOOK_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: alertmanager-secrets
+                  key: webhook-password
+            - name: RECOVERY_COOLDOWN
+              value: "120"
+            - name: KUBECONFIG_IN_CLUSTER
+              value: "true"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5001
+            periodSeconds: 30
+---
+# ── Webhook ServiceAccount with K8s API access ────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: webhook-receiver-sa
+  namespace: self-healing
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: webhook-receiver-role
+  namespace: self-healing
+rules:
+  - apiGroups: ["apps"]
+    resources: [deployments, replicasets]
+    verbs: [get, list, patch, update]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, delete]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: webhook-receiver-rolebinding
+  namespace: self-healing
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: webhook-receiver-role
+subjects:
+  - kind: ServiceAccount
+    name: webhook-receiver-sa
+    namespace: self-healing
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webhook-receiver
+  namespace: self-healing
+spec:
+  selector:
+    app: webhook-receiver
+  ports:
+    - port: 5001
+      targetPort: 5001

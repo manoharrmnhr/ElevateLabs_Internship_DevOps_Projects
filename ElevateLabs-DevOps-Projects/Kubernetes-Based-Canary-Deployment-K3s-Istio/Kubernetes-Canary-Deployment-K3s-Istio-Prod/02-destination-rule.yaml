@@ -1,0 +1,81 @@
+---
+# ═══════════════════════════════════════════════════════════════
+# DestinationRule — demo-app-dr
+#
+# Defines two named subsets (stable / canary) and attaches
+# production-grade traffic policies:
+#   • Connection pool limits   — prevent cascading overload
+#   • Outlier detection        — circuit breaker per pod
+#   • mTLS                     — encrypt all in-mesh traffic
+# ═══════════════════════════════════════════════════════════════
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: demo-app-dr
+  namespace: canary-demo
+  labels:
+    app.kubernetes.io/part-of: canary-demo
+spec:
+  host: demo-app
+
+  # ── Global traffic policy (applies to both subsets) ──────────
+  trafficPolicy:
+    # mTLS: all pod-to-pod comms inside the mesh are encrypted
+    tls:
+      mode: ISTIO_MUTUAL
+
+    # Connection pool: protect downstream from overload
+    connectionPool:
+      tcp:
+        maxConnections:        100
+        connectTimeout:        30ms
+        tcpKeepalive:
+          time:     7200s
+          interval: 75s
+      http:
+        http2MaxRequests:         1000
+        maxRequestsPerConnection: 10
+        maxPendingRequests:       100
+        idleTimeout:              60s
+        h2UpgradePolicy:          UPGRADE
+
+    # Outlier detection (per-pod circuit breaker)
+    # If a pod throws ≥5 consecutive 5xx → eject it for 30s
+    outlierDetection:
+      consecutive5xxErrors:     5
+      consecutiveGatewayErrors: 5
+      interval:                 10s
+      baseEjectionTime:         30s
+      maxEjectionPercent:       50        # never eject more than half the pool
+      minHealthPercent:         50
+      splitExternalLocalOriginErrors: false
+
+    # Load balancing
+    loadBalancer:
+      simple: LEAST_REQUEST               # route to pod with fewest active requests
+
+  # ── Subsets ───────────────────────────────────────────────────
+  subsets:
+  # Stable: selects pods with label track=stable
+  - name:   stable
+    labels:
+      track: stable
+    trafficPolicy:
+      loadBalancer:
+        simple:                  ROUND_ROBIN
+        localityLbSetting:
+          enabled:               true     # prefer same AZ
+
+  # Canary: selects pods with label track=canary
+  - name:   canary
+    labels:
+      track: canary
+    trafficPolicy:
+      loadBalancer:
+        simple: ROUND_ROBIN
+      # Tighter circuit breaker for canary — fail fast
+      outlierDetection:
+        consecutive5xxErrors: 3
+        interval:             10s
+        baseEjectionTime:     60s         # longer ejection for canary faults
+        maxEjectionPercent:   100         # can eject all canary pods if bad

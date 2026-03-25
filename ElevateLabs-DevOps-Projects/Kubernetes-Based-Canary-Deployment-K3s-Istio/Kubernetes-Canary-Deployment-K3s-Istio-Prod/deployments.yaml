@@ -1,0 +1,103 @@
+{{- range $track := list "stable" "canary" }}
+{{- $cfg := index $.Values $track }}
+{{- if $cfg.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $cfg.name }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    app:     demo-app
+    version: {{ $cfg.version }}
+    track:   {{ $cfg.track }}
+    helm.sh/chart: {{ $.Chart.Name }}-{{ $.Chart.Version }}
+  {{- if eq $track "canary" }}
+  annotations:
+    deployment.kubernetes.io/canary: "true"
+  {{- end }}
+spec:
+  replicas: {{ $cfg.replicas }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app:   demo-app
+      track: {{ $cfg.track }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge:       1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app:     demo-app
+        version: {{ $cfg.version }}
+        track:   {{ $cfg.track }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "3000"
+        prometheus.io/path:   "/metrics"
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: app
+        image: "{{ if $.Values.image.registry }}{{ $.Values.image.registry }}/{{ end }}{{ $cfg.image }}:{{ $cfg.tag }}"
+        imagePullPolicy: {{ $.Values.image.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: 3000
+        env:
+        - name:  APP_VERSION
+          value: {{ $cfg.version | quote }}
+        - name:  BUILD_ID
+          value: {{ $cfg.buildId | quote }}
+        - name:  TRACK
+          value: {{ $cfg.track | quote }}
+        - name:  PORT
+          value: "3000"
+        {{- if and (eq $track "canary") $cfg.faultRate }}
+        - name:  FAULT_RATE
+          value: {{ $cfg.faultRate | quote }}
+        {{- end }}
+        envFrom:
+        - configMapRef:
+            name: app-config
+        resources:
+          requests:
+            cpu:    {{ $cfg.resources.requests.cpu }}
+            memory: {{ $cfg.resources.requests.memory }}
+          limits:
+            cpu:    {{ $cfg.resources.limits.cpu }}
+            memory: {{ $cfg.resources.limits.memory }}
+        startupProbe:
+          httpGet: { path: /healthz, port: 3000 }
+          failureThreshold: 6
+          periodSeconds:    5
+        readinessProbe:
+          httpGet: { path: /readyz, port: 3000 }
+          initialDelaySeconds: 5
+          periodSeconds:       10
+          failureThreshold:    3
+          timeoutSeconds:      2
+        livenessProbe:
+          httpGet: { path: /healthz, port: 3000 }
+          initialDelaySeconds: 15
+          periodSeconds:       20
+          failureThreshold:    3
+          timeoutSeconds:      3
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/bin/sh", "-c", "sleep 5"]
+        securityContext:
+          runAsNonRoot:             true
+          runAsUser:                1001
+          readOnlyRootFilesystem:   true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+      securityContext:
+        fsGroup: 1001
+{{- end }}
+{{- end }}
